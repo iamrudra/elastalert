@@ -5,120 +5,211 @@ Examples of several types of rule configuration can be found in the example_rule
 
 .. _commonconfig:
 
+.. note:: All "time" formats are of the form ``unit: X`` where unit is one of weeks, days, hours, minutes or seconds.
+    Such as ``minutes: 15`` or ``hours: 1``.
+
+
 Rule Configuration Cheat Sheet
 ==============================
 
 
-+--------------------------------------------------------------------------------------------------------------------------------+
-|              FOR ALL RULES                                                                                                     |
-+===================================================+===========+====================================================+===========+
-| ``es_host`` (string)                              |           | ``buffer_time`` (time)                             | Optional  |
-+---------------------------------------------------+           +----------------------------------------------------+           +
-| ``es_port`` (number)                              | Required  | ``query_delay`` (time)                             |           |
-+---------------------------------------------------+-----------+----------------------------------------------------+           +
-| ``use_ssl`` (boolean, no default)                 | Optional  | ``max_query_size`` (int, default 100k)             |           |
-+---------------------------------------------------+           +----------------------------------------------------+           +
-| ``es_username`` (string, no default)              |           | ``filter`` (DSL filter, empty default)             |           |
-+---------------------------------------------------+           +----------------------------------------------------+           +
-| ``es_password`` (string, no default)              |           | ``include`` (list of strs)                         |           |
-+---------------------------------------------------+-----------+----------------------------------------------------+           +
-| ``index`` (string)                                | Required  | ``top_count_keys`` (list of strs)                  |           |
-+---------------------------------------------------+-----------+----------------------------------------------------+           +
-| ``use_strftime_index`` (boolean)                  | Optional  | ``top_count_number`` (int, default 5)              |           |
-+---------------------------------------------------+-----------+----------------------------------------------------+           +
-| ``name`` (string)                                 | Required  |``raw_count_keys`` (boolean, default T)             |           |
-+---------------------------------------------------+           +----------------------------------------------------+           +
-| ``type`` (string)                                 |           |``generate_kibana_link`` (boolean, default F)       |           |
-+---------------------------------------------------+           +----------------------------------------------------+           +
-| ``alert`` (string)                                |           |``kibana_dashboard`` (string, default from es_host) |           |
-+---------------------------------------------------+-----------+----------------------------------------------------+           +
-|``aggregation`` (time, no default)                 | Optional  |``use_kibana_dashboard`` (string, no default)       |           |
-+---------------------------------------------------+           +----------------------------------------------------+           +
-| ``realert`` (time, default: 1 min)                |           |``use_local_time`` (boolean, default T)             |           |
-+---------------------------------------------------+           +----------------------------------------------------+           +
-|``exponential_realert`` (time, no default)         |           |``match_enhancements`` (list of strs, no default)   |           |
-+---------------------------------------------------+           +----------------------------------------------------+           +
-|``kibana4_start_timedelta`` (time, default: 10 min)|           |``kibana4_end_timedelta`` (time, default: 10 min)   |           |
-+---------------------------------------------------+-----------+----------------------------------------------------+-----------+
++--------------------------------------------------------------------------+
+|              FOR ALL RULES                                               |
++==============================================================+===========+
+| ``es_host`` (string)                                         |  Required |
++--------------------------------------------------------------+           |
+| ``es_port`` (number)                                         |           |
++--------------------------------------------------------------+           |
+| ``index`` (string)                                           |           |
++--------------------------------------------------------------+           |
+| ``name`` (string)                                            |           |
++--------------------------------------------------------------+           |
+| ``type`` (string)                                            |           |
++--------------------------------------------------------------+           |
+| ``alert`` (string or list)                                   |           |
++--------------------------------------------------------------+-----------+
+| ``use_strftime_index`` (boolean, default False)              |  Optional |
++--------------------------------------------------------------+           |
+| ``use_ssl`` (boolean, default False)                         |           |
++--------------------------------------------------------------+           |
+| ``es_username`` (string, no default)                         |           |
++--------------------------------------------------------------+           |
+| ``es_password`` (string, no default)                         |           |
++--------------------------------------------------------------+           |
+| ``aggregation`` (time, no default)                           |           |
++--------------------------------------------------------------+           |
+| ``description`` (string, default empty string)               |           |
++--------------------------------------------------------------+           |
+| ``generate_kibana_link`` (boolean, default False)            |           |
++--------------------------------------------------------------+           |
+|``use_kibana_dashboard`` (string, no default)                 |           |
++--------------------------------------------------------------+           |
+|``kibana_url`` (string, default from es_host)                 |           |
++--------------------------------------------------------------+           |
+|``use_kibana4_dashboard`` (string, no default)                |           |
++--------------------------------------------------------------+           |
+|``kibana4_start_timedelta`` (time, default: 10 min)           |           |
++--------------------------------------------------------------+           |
+|``kibana4_end_timedelta`` (time, default: 10 min)             |           |
++--------------------------------------------------------------+           |
+|``use_local_time`` (boolean, default True)                    |           |
++--------------------------------------------------------------+           |
+| ``realert`` (time, default: 1 min)                           |           |
++--------------------------------------------------------------+           |
+|``exponential_realert`` (time, no default)                    |           |
++--------------------------------------------------------------+           |
+|``match_enhancements`` (list of strs, no default)             |           |
++--------------------------------------------------------------+           |
+| ``top_count_number`` (int, default 5)                        |           |
++--------------------------------------------------------------+           |
+| ``top_count_keys`` (list of strs)                            |           |
++--------------------------------------------------------------+           |
+|``raw_count_keys`` (boolean, default True)                    |           |
++--------------------------------------------------------------+           |
+| ``include`` (list of strs, default ["*"])                    |           |
++--------------------------------------------------------------+           |
+| ``filter`` (ES filter DSL, no default)                       |           |
++--------------------------------------------------------------+           |
+| ``max_query_size`` (int, default global max_query_size)      |           |
++--------------------------------------------------------------+           |
+| ``query_delay`` (time, default 0 min)                        |           |
++--------------------------------------------------------------+           |
+| ``buffer_time`` (time, default from config.yaml)             |           |
+|                                                              |           |
+| IGNORED IF ``use_count_query`` or ``use_terms_query`` is true|           |
++--------------------------------------------------------------+           +
+| ``timestamp_type`` (string, default iso)                     |           |
++--------------------------------------------------------------+           |
+| ``_source_enabled`` (boolean, default True)                  |           |
++--------------------------------------------------------------+-----------+
 
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|      RULE TYPE                                 | Any | Blacklist | Whitelist | Change | Frequency | Spike | Flatline |New_term|Cardinality|
-+================================================+=====+===========+===========+========+===========+=======+==========+========+===========+
-| ``compare_key`` (string, no default)           |     |    Req    |  Req      |    Req |           |       |          |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``blacklist`` (list of strs, no default)        |     |   Req     |           |        |           |       |          |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``whitelist`` (list of strs, no default)        |     |           |   Req     |        |           |       |          |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-| ``ignore_null`` (boolean, no default)          |     |           |   Req     |  Req   |           |       |          |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-| ``query_key`` (string, no default)             |     |           |           |   Req  |    Opt    |  Opt  |   Opt    |  Req   |  Opt      |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-| ``timeframe`` (time, no default)               |     |           |           |   Opt  |    Req    |  Req  |   Req    |        |  Req      |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-| ``num_events`` (int, no default)               |     |           |           |        |    Req    |       |          |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``use_count_query`` (boolean, no default)       |     |           |           |        |     Opt   | Opt   | Opt      |        |           |
-|                                                |     |           |           |        |           |       |          |        |           |
-|``doc_type`` (string, no default)               |     |           |           |        |           |       |          |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``use_terms_query`` (boolean, no default)       |     |           |           |        |     Opt   | Opt   |          | Opt    |           |
-|                                                |     |           |           |        |           |       |          |        |           |
-|``doc_type`` (string, no default)               |     |           |           |        |           |       |          |        |           |
-|                                                |     |           |           |        |           |       |          |        |           |
-|``query_key`` (string, no default)              |     |           |           |        |           |       |          |        |           |
-|                                                |     |           |           |        |           |       |          |        |           |
-|``terms_size`` (int, default 50)                |     |           |           |        |           |       |          |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-| ``spike_height`` (int, no default)             |     |           |           |        |           |   Req |          |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``spike_type`` ([up|down|both], no default)     |     |           |           |        |           |   Req |          |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``alert_on_new_data`` (boolean, default F)      |     |           |           |        |           |   Opt |          |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``threshold_ref`` (int, no default)             |     |           |           |        |           |   Opt |          |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``threshold_cur`` (int, no default)             |     |           |           |        |           |   Opt |          |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``threshold`` (int, no default)                 |     |           |           |        |           |       |    Req   |        |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``fields`` (string, no default)                 |     |           |           |        |           |       |          | Req    |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``terms_window_size`` (time, default 30 days)   |     |           |           |        |           |       |          | Opt    |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``alert_on_missing_fields`` (boolean, default F)|     |           |           |        |           |       |          | Opt    |           |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``cardinality_field`` (string, no default)      |     |           |           |        |           |       |          |        |  Req      |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``max_cardinality`` (boolean, no default)       |     |           |           |        |           |       |          |        |  Opt      |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
-|``min_cardinality`` (boolean, no default)       |     |           |           |        |           |       |          |        |  Opt      |
-+------------------------------------------------+-----+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|
+
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|      RULE TYPE                                     |   Any  | Blacklist | Whitelist | Change | Frequency | Spike | Flatline |New_term|Cardinality|
++====================================================+========+===========+===========+========+===========+=======+==========+========+===========+
+| ``compare_key`` (string, no default)               |        |    Req    |   Req     |  Req   |           |       |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``blacklist`` (list of strs, no default)            |        |    Req    |           |        |           |       |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``whitelist`` (list of strs, no default)            |        |           |   Req     |        |           |       |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+| ``ignore_null`` (boolean, no default)              |        |           |   Req     |  Req   |           |       |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+| ``query_key`` (string, no default)                 |   Opt  |           |           |   Req  |    Opt    |  Opt  |   Opt    |  Req   |  Opt      |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+| ``timeframe`` (time, no default)                   |        |           |           |   Opt  |    Req    |  Req  |   Req    |        |  Req      |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+| ``num_events`` (int, no default)                   |        |           |           |        |    Req    |       |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+| ``attach_related`` (boolean, no default)           |        |           |           |        |    Opt    |       |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``use_count_query`` (boolean, no default)           |        |           |           |        |     Opt   | Opt   | Opt      |        |           |
+|                                                    |        |           |           |        |           |       |          |        |           |
+|``doc_type`` (string, no default)                   |        |           |           |        |           |       |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``use_terms_query`` (boolean, no default)           |        |           |           |        |     Opt   | Opt   |          | Opt    |           |
+|                                                    |        |           |           |        |           |       |          |        |           |
+|``doc_type`` (string, no default)                   |        |           |           |        |           |       |          |        |           |
+|                                                    |        |           |           |        |           |       |          |        |           |
+|``query_key`` (string, no default)                  |        |           |           |        |           |       |          |        |           |
+|                                                    |        |           |           |        |           |       |          |        |           |
+|``terms_size`` (int, default 50)                    |        |           |           |        |           |       |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+| ``spike_height`` (int, no default)                 |        |           |           |        |           |   Req |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``spike_type`` ([up|down|both], no default)         |        |           |           |        |           |   Req |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``alert_on_new_data`` (boolean, default False)      |        |           |           |        |           |   Opt |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``threshold_ref`` (int, no default)                 |        |           |           |        |           |   Opt |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``threshold_cur`` (int, no default)                 |        |           |           |        |           |   Opt |          |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``threshold`` (int, no default)                     |        |           |           |        |           |       |    Req   |        |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``fields`` (string, no default)                     |        |           |           |        |           |       |          | Req    |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``terms_window_size`` (time, default 30 days)       |        |           |           |        |           |       |          | Opt    |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``alert_on_missing_fields`` (boolean, default False)|        |           |           |        |           |       |          | Opt    |           |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``cardinality_field`` (string, no default)          |        |           |           |        |           |       |          |        |  Req      |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``max_cardinality`` (boolean, no default)           |        |           |           |        |           |       |          |        |  Opt      |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
+|``min_cardinality`` (boolean, no default)           |        |           |           |        |           |       |          |        |  Opt      |
++----------------------------------------------------+--------+-----------+-----------+--------+-----------+-------+----------+--------+-----------+
 
 Common Configuration Options
 ============================
 
 Every file that ends in ``.yaml`` in the ``rules_folder`` will be run by default.
-The following configuration settings are common to all types of rules:
+The following configuration settings are common to all types of rules.
 
 Required Settings
 ~~~~~~~~~~~~~~~~~
 
+es_host
+^^^^^^^
+
 ``es_host``: The hostname of the Elasticsearch cluster the rule will use to query. (Required, string, no default)
+
+es_port
+^^^^^^^
 
 ``es_port``: The port of the Elasticsearch cluster. (Required, number, no default)
 
-``use_ssl``: Optional; whether or not to connect to ``es_host`` using SSL; set to ``True`` or ``False``.
-
-``es_username``: Optional; basic-auth username for connecting to ``es_host``.
-
-``es_password``: Optional; basic-auth password for connecting to ``es_host``.
-
-``es_url_prefix``: Optional; URL prefix for the Elasticsearch endpoint.
+index
+^^^^^
 
 ``index``: The name of the index that will be searched. Wildcards can be used here, such as:
 ``index: my-index-*`` which will match ``my-index-2014-10-05``. You can also use a format string containing
 ``%Y`` for year, ``%m`` for month, and ``%d`` for day. To use this, you must also set ``use_strftime_index`` to true. (Required, string, no default)
+
+name
+^^^^
+
+``name``: The name of the rule. This must be unique across all rules. The name will be used in
+alerts and used as a key when writing and reading search metadata back from Elasticsearch. (Required, string, no default)
+
+type
+^^^^
+
+``type``: The ``RuleType`` to use. This may either be one of the built in rule types, see :ref:`Rule Types <ruletypes>` section below for more information,
+or loaded from a module. For loading from a module, the type should be specified as ``module.file.RuleName``. (Required, string, no default)
+
+alert
+^^^^^
+
+``alert``: The ``Alerter`` type to use. This may be one or more of the built in alerts, see :ref:`Alert Types <alerts>` section below for more information,
+or loaded from a module. For loading from a module, the alert should be specified as ``module.file.AlertName``. (Required, string or list, no default)
+
+Optional Settings
+~~~~~~~~~~~~~~~~~
+
+use_ssl
+^^^^^^^
+
+``use_ssl``: Whether or not to connect to ``es_host`` using SSL. (Optional, boolean, default False)
+
+es_username
+^^^^^^^^^^^
+
+``es_username``: basic-auth username for connecting to ``es_host``. (Optional, string, no default)
+
+es_password
+^^^^^^^^^^^
+
+``es_password``: basic-auth password for connecting to ``es_host``. (Optional, string, no default)
+
+es_url_prefix
+^^^^^^^^^^^^^
+
+``es_url_prefix``: URL prefix for the Elasticsearch endpoint. (Optional, string, no default)
+
+use_strftime_index
+^^^^^^^^^^^^^^^^^^
 
 ``use_strftime_index``: If this is true, ElastAlert will format the index using datetime.strftime for each query.
 See https://docs.python.org/2/library/datetime.html#strftime-strptime-behavior for more details.
@@ -127,27 +218,33 @@ as narrowing the number of indexes searched, compared to using a wildcard, may b
 ``logstash-%Y.%m.%d``, the query url will be similar to ``elasticsearch.example.com/logstash-2015.02.03/...`` or
 ``elasticsearch.example.com/logstash-2015.02.03,logstash-2015.02.04/...``.
 
-``name``: The name of the rule. This must be unique across all rules. The name will be used in
-alerts and used as a key when writing and reading search metadata back from Elasticsearch. (Required, string, no default)
-
-``type``: The ``RuleType`` to use. This may either be one of the built in rule types, see :ref:`Rule Types <ruletypes>` section below for more information,
-or loaded from a module. For loading from a module, the type should be specified as ``module.file.RuleName``. (Required, string, no default)
-
-``alert``: The ``Alerter`` type to use. This may be one of the built in alerts, see :ref:`Alert Types <alerts>` section below for more information,
-or loaded from a module. For loading from a module, the alert should be specified as ``module.file.AlertName``. (Required, string, no default)
-
-Optional Settings
-~~~~~~~~~~~~~~~~~
+aggregation
+^^^^^^^^^^^
 
 ``aggregation``: This option allows you to aggregate multiple matches together into one alert. Every time a match is found,
 ElastAlert will wait for the ``aggregation`` period, and send all of the matches that have occurred in that time for a particular
-rule together. For example,
+rule together.
 
-``aggregation: hours: 2``
+For example::
+
+    aggregation:
+      hours: 2
 
 means that if one match occurred at 12:00, another at 1:00, and a third at 2:30, one
 alert would be sent at 2:00, containing the first two matches, and another at 4:30, containing the third match plus any additional matches
 occurring before 4:30. This can be very useful if you expect a large number of matches and only want a periodic report. (Optional, time, default none)
+
+If you wish to aggregate all your alerts and send them on a recurring interval, you can do that using the ``schedule`` field.
+
+For example, if you wish to receive alerts every Monday and Friday::
+
+    aggregation:
+      schedule: '2 4 * * mon,fri'
+
+This uses Cron syntax, which you can read more about `here <http://www.nncron.ru/help/EN/working/cron-format.htm>`_. Make sure to `only` include either a schedule field or standard datetime fields (such as ``hours``, ``minutes``, ``days``), not both.
+
+realert
+^^^^^^^
 
 ``realert``: This option allows you to ignore repeating alerts for a period of time. If the rule uses a ``query_key``, this option
 will be applied on a per key basis. All matches for a given rule, or for matches with the same ``query_key``, will be ignored for
@@ -156,6 +253,9 @@ This is applied to the time the alert is sent, not to the time of the event. It 
 that if ElastAlert is run over a large time period which triggers many matches, only the first alert will be sent by default. If you want
 every alert, set realert to 0 minutes. (Optional, time, default 1 minute)
 
+exponential_realert
+^^^^^^^^^^^^^^^^^^^
+
 ``exponential_realert``: This option causes the value of ``realert`` to exponentially increase while alerts continue to fire. If set,
 the value of ``exponential_realert`` is the maximum ``realert`` will increase to. If the time between alerts is less than twice ``realert``,
 ``realert`` will double. For example, if ``realert: minutes: 10`` and ``exponential_realert: hours: 1``, an alerts fires at 1:00 and another
@@ -163,23 +263,43 @@ at 1:15, the next alert will not be until at least 1:35. If another alert fires 
 1 hour maximum. If more than 2 hours elapse before the next alert, ``realert`` will go back down. Note that alerts that are ignored (e.g.
 one that occurred at 1:05) would not change ``realert``. (Optional, time, no default)
 
-``buffer_time``: This options allows the rule to override the ``buffer_time`` global setting defined in config.yaml. (Optional, time)
+buffer_time
+^^^^^^^^^^^
+
+``buffer_time``: This options allows the rule to override the ``buffer_time`` global setting defined in config.yaml. This value is ignored if
+``use_count_query`` or ``use_terms_query`` is true. (Optional, time)
+
+query_delay
+^^^^^^^^^^^
 
 ``query_delay``: This option will cause ElastAlert to subtract a time delta from every query, causing the rule to run with a delay.
 This is useful if the data is Elasticsearch doesn't get indexed immediately. (Optional, time)
 
+max_query_size
+^^^^^^^^^^^^^^
+
 ``max_query_size``: The maximum number of documents that will be downloaded from Elasticsearch in a single query. If you
 expect a large number of results, consider using ``use_count_query`` for the rule. If this
 limit is reached, a warning will be logged but ElastAlert will continue without downloading more results. This setting will
-override a global ``max_query_size``. (Optional, int, default 100,000)
+override a global ``max_query_size``. (Optional, int, default value of global ``max_query_size``)
+
+filter
+^^^^^^
 
 ``filter``: A list of Elasticsearch query DSL filters that is used to query Elasticsearch. ElastAlert will query Elasticsearch using the format
-``{'filtered': {'and': [config.filter]}}`` with an additional timestamp range filter.
+``{'filter': {'bool': {'must': [config.filter]}}}`` with an additional timestamp range filter.
 All of the results of querying with these filters are passed to the ``RuleType`` for analysis.
 For more information writing filters, see :ref:`Writing Filters <writingfilters>`. (Required, Elasticsearch query DSL, no default)
 
-``include``: A list of terms that should be included in query results and passed to rule types and alerts. '@timestamp', ``query_key``,
-``compare_key``, and ``top_count_keys``  are automatically included, if present. (Optional, list of strings)
+include
+^^^^^^^
+
+``include``: A list of terms that should be included in query results and passed to rule types and alerts. When set, only those
+fields, along with '@timestamp', ``query_key``, ``compare_key``, and ``top_count_keys``  are included, if present.
+(Optional, list of strings, default all fields)
+
+top_count_keys
+^^^^^^^^^^^^^^
 
 ``top_count_keys``: A list of fields. ElastAlert will perform a terms query for the top X most common values for each of the fields,
 where X is 5 by default, or ``top_count_number`` if it exists.
@@ -188,9 +308,24 @@ have each username, for the top 5 usernames. When this is computed, the time ran
 to 10 minutes past the most recent event. Because ElastAlert uses an aggregation query to compute this, it will attempt to use the
 field name plus ".raw" to count unanalyzed terms. To turn this off, set ``raw_count_keys`` to false.
 
+top_count_number
+^^^^^^^^^^^^^^^^
+
 ``top_count_number``: The number of terms to list if ``top_count_keys`` is set. (Optional, integer, default 5)
 
+raw_count_keys
+^^^^^^^^^^^^^^
+
 ``raw_count_keys``: If true, all fields in ``top_count_keys`` will have ``.raw`` appended to them. (Optional, boolean, default true)
+
+description
+^^^^^^^^^^^
+
+``description``: text describing the purpose of rule. (Optional, string, default empty string)
+Can be referenced in custom alerters to provide context as to why a rule might trigger.
+
+generate_kibana_link
+^^^^^^^^^^^^^^^^^^^^
 
 ``generate_kibana_link``: This option is for Kibana 3 only.
 If true, ElastAlert will generate a temporary Kibana dashboard and include a link to it in alerts. The dashboard
@@ -198,35 +333,59 @@ consists of an events over time graph and a table with ``include`` fields select
 dashboard will also contain a filter for the ``query_key`` of the alert. The dashboard schema will
 be uploaded to the kibana-int index as a temporary dashboard. (Optional, boolean, default False)
 
+kibana_url
+^^^^^^^^^^
+
 ``kibana_url``: The url to access Kibana. This will be used if ``generate_kibana_link`` or
 ``use_kibana_dashboard`` is true. If not specified, a URL will be constructed using ``es_host`` and ``es_port``.
 (Optional, string, default ``http://<es_host>:<es_port>/_plugin/kibana/``)
+
+use_kibana_dashboard
+^^^^^^^^^^^^^^^^^^^^
 
 ``use_kibana_dashboard``: The name of a Kibana 3 dashboard to link to. Instead of generating a dashboard from a template,
 ElastAlert can use an existing dashboard. It will set the time range on the dashboard to around the match time,
 upload it as a temporary dashboard, add a filter to the ``query_key`` of the alert if applicable,
 and put the url to the dashboard in the alert. (Optional, string, no default)
 
+use_kibana4_dashboard
+^^^^^^^^^^^^^^^^^^^^^
+
 ``use_kibana4_dashboard``: A link to a Kibana 4 dashboard. For example, "https://kibana.example.com/#/dashboard/My-Dashboard".
 This will set the time setting on the dashboard from the match time minus the timeframe, to 10 minutes after the match time.
 Note that this does not support filtering by ``query_key`` like Kibana 3.
+
+kibana4_start_timedelta
+^^^^^^^^^^^^^^^^^^^^^^^
 
 ``kibana4_start_timedelta``: Defaults to 10 minutes. This option allows you to specify the start time for the generated kibana4 dashboard.
 This value is added in front of the event. For example,
 
 ``kibana4_start_timedelta: minutes: 2``
 
+kibana4_end_timedelta
+^^^^^^^^^^^^^^^^^^^^^
+
 ``kibana4_end_timedelta``: Defaults to 10 minutes. This option allows you to specify the end time for the generated kibana4 dashboard.
 This value is added in back of the event. For example,
 
 ``kibana4_end_timedelta: minutes: 2``
 
+use_local_time
+^^^^^^^^^^^^^^
+
 ``use_local_time``: Whether to convert timestamps to the local time zone in alerts. If false, timestamps will
 be converted to UTC, which is what ElastAlert uses internally. (Optional, boolean, default true)
+
+match_enhancements
+^^^^^^^^^^^^^^^^^^
 
 ``match_enhancements``: A list of enhancement modules to use with this rule. An enhancement module is a subclass of enhancements.BaseEnhancement
 that will be given the match dictionary and can modify it before it is passed to the alerter. The enhancements should be specified as
 ``module.file.EnhancementName``. See :ref:`Enhancements` for more information. (Optional, list of strings, no default)
+
+query_key
+^^^^^^^^^
 
 ``query_key``: Having a query key means that realert time will be counted separately for each unique value of ``query_key``. For rule types which
 count documents, such as spike, frequency and flatline, it also means that these counts will be independent for each unique value of ``query_key``.
@@ -236,12 +395,18 @@ additional alerts for ``{'username': 'bob'}`` will be ignored while other userna
 treated as if it were a single field whose value is the component values, or "None", joined by commas. A new field with the key
 "field1,field2,etc" will be created in each document and may conflict with existing fields of the same name.
 
+timestamp_type
+^^^^^^^^^^^^^^
+
 ``timestamp_type``: One of ``iso``, ``unix``, or ``unix_ms``. This option will set the type of ``@timestamp`` (or ``timestamp_field``) used
 to query Elasticsearch. ``iso`` will use ISO8601 timestamps, which will work with any Elasticsearch date type field. ``unix`` will
 query using an integer unix (seconds since 1/1/1970) timestamp. ``unix_ms`` will use milliseconds unix timestamp. The default is ``iso``.
 (Optional, string enum, default iso).
 
-``_source_enabled``: If true, ElastAlert will use ``_source_include`` to retrieve fields from documents in Elasticsearch. If false,
+_source_enabled
+^^^^^^^^^^^^^^^
+
+``_source_enabled``: If true, ElastAlert will use _source to retrieve fields from documents in Elasticsearch. If false,
 ElastAlert will use ``fields`` to retrieve stored fields. Both of these are represented internally as if they came from ``_source``.
 See https://www.elastic.co/guide/en/elasticsearch/reference/1.3/mapping-fields.html for more details. The fields used come from ``include``,
 see above for more details. (Optional, boolean, default True)
@@ -443,6 +608,9 @@ default 50, unique terms.
 all with the same value of ``query_key``, will trigger an alert.
 
 
+``attach_related``: Will attach all the related events to the event that triggered the frequency alert. For example in an alert triggered with ``num_events``: 3,
+the 3rd event will trigger the alert on itself and add the other 2 events in a key named ``related_events`` that can be accessed in the alerter.
+
 Spike
 ~~~~~~
 
@@ -603,7 +771,7 @@ use an aggregation query to gather all known terms for a list of fields.
 
 This rule requires one additional option:
 
-``fields``: A list of fields to monitor for new terms.
+``fields``: A list of fields to monitor for new terms. ``query_key`` will be used if ``fields`` is not set.
 
 Optional:
 
@@ -621,7 +789,7 @@ Cardinality
 ~~~~~~~~
 
 ``cardinality``: This rule matches when a the total number of unique values for a certain field within a time frame is higher or lower
-than a threshold. 
+than a threshold.
 
 This rule requires:
 
@@ -697,7 +865,7 @@ There are several ways to format the body text of the various types of events. I
     field_values        = Field, ": ", Value
 
 Similarly to ``alert_subject``, ``alert_text`` can be further formatted using standard Python formatting syntax.
-The field names whose values will be used as the arguments can be passed with ``alert_text_args``.
+The field names whose values will be used as the arguments can be passed with ``alert_text_args`` or ``alert_text_kw``.
 
 By default::
 
@@ -737,14 +905,15 @@ Command
 ~~~~~~~
 
 The command alert allows you to execute an arbitrary command and pass arguments or stdin from the match. Arguments to the command can use
-Python format string syntax to access parts of the match. The alerter will open a subprocess and optionally pass the match, as JSON, to
-the stdin of the process.
+Python format string syntax to access parts of the match. The alerter will open a subprocess and optionally pass the match, or matches
+in the case of an aggregated alert, as a JSON array, to the stdin of the process.
 
 This alert requires one option:
 
 ``command``: A list of arguments to execute or a string to execute. If in list format, the first argument is the name of the program to execute. If passing a
 string, the command will be executed through the shell. The command string or args will be formatted using Python's % string format syntax with the
-match passed the format argument. This means that a field can be accessed with ``%(field_name)s``.
+match passed the format argument. This means that a field can be accessed with ``%(field_name)s``. In an aggregated alert, these fields will come
+from the first match.
 
 Optional:
 
@@ -822,6 +991,8 @@ Optional:
 
 ``jira_component``: The name of the component to set the ticket to.
 
+``jira_description``: Similar to ``alert_text``, this text is prepended to the JIRA description.
+
 ``jira_label``: The label to add to the JIRA ticket.
 
 ``jira_priority``: The index of the priority to set the issue to. In the JIRA dropdown for priorities, 0 would represent the first priority,
@@ -854,7 +1025,136 @@ Example usage::
     jira_bump_in_statuses:
       - Open
 
+OpsGenie
+~~~~~~~~
+
+OpsGenie alerter will create an alert which can be used to notify Operations people of issues or log information. An OpsGenie ``API``
+integration must be created in order to acquire the necessary ``opsgenie_key`` rule variable. Currently the OpsGenieAlerter only creates
+an alert, however it could be extended to update or close existing alerts.
+
+It is necessary for the user to create an OpsGenie Rest HTTPS API `integration page <https://app.opsgenie.com/integration>`_ in order to create alerts.
+
+The OpsGenie alert requires one option:
+
+``opsgenie_key``: The randomly generated API Integration key created by OpsGenie.
+
+Optional:
+
+``opsgenie_account``: The OpsGenie account to integrate with.
+
+``opsgenie_recipients``: A list OpsGenie recipients who will be notified by the alert.
+
+``opsgenie_teams``: A list of OpsGenie teams to notify (useful for schedules with escalation).
+
+``opsgenie_tags``: A list of tags for this alert.
+
+``opsgenie_message``: Set the OpsGenie message to something other than the rule name. The message can be formatted with fields from the first match e.g. "Error occurred for {app_name} at {timestamp}.".
+
+``opsgenie_alias``: Set the OpsGenie alias. The alias can be formatted with fields from the first match e.g "{app_name} error".
+
+SNS
+~~~
+
+The SNS alerter will send an SNS notification. The body of the notification is formatted the same as with other alerters. The SNS alerter
+uses boto and can use credentials in the rule yaml or in a standard boto credential file.
+See http://boto.readthedocs.org/en/latest/boto_config_tut.html#details for details.
+
+SNS requires one option:
+
+``sns_topic_arn``: The SNS topic's ARN. For example, ``arn:aws:sns:us-east-1:123456789:somesnstopic``
+
+Optional:
+
+``aws_access_key``: An access key to connect to SNS with.
+
+``aws_secret_key``: The secret key associated with the access key.
+
+``aws_region``: The AWS region in which the SNS resource is located. Default is us-east-1
+
+``boto_profile``: The boto profile to use. If none specified, the default will be used.
+
+HipChat
+~~~~~~~
+
+HipChat alerter will send a notification to a predefined HipChat room. The body of the notification is formatted the same as with other alerters.
+
+The alerter requires the following two options:
+
+``hipchat_auth_token``: The randomly generated notification token created by HipChat. Go to https://XXXXX.hipchat.com/account/api and use
+'Create new token' section, choosing 'Send notification' in Scopes list.
+
+``hipchat_room_id``: The id associated with the HipChat room you want to send the alert to. Go to https://XXXXX.hipchat.com/rooms and choose
+the room you want to post to. The room ID will be the numeric part of the URL.
+
+``hipchat_domain``: The custom domain in case you have Hipchat own server deployment. Default is api.hipchat.com.
+
+``hipchat_ignore_ssl_errors``: Ignore SSL errors (self-signed certificates, etc.). Default is false.
+
+Slack
+~~~~~
+
+Slack alerter will send a notification to a predefined Slack channel. The body of the notification is formatted the same as with other alerters.
+
+The alerter requires the following option:
+
+``slack_webhook_url``: The webhook URL that includes your auth data and the ID of the channel (room) you want to post to. Go to the Incoming Webhooks
+section in your Slack account https://XXXXX.slack.com/services/new/incoming-webhook , choose the channel, click 'Add Incoming Webhooks Integration'
+and copy the resulting URL.
+
+Optional:
+
+``slack_username_override``: By default Slack will use your username when posting to the channel. Use this option to change it (free text).
+
+``slack_emoji_override``: By default Elastalert will use the :ghost: emoji when posting to the channel. You can use a different emoji per
+Elastalert rule. Any Apple emoji can be used, see http://emojipedia.org/apple/
+
+``slack_msg_color``: By default the alert will be posted with the 'danger' color. You can also use 'good' or 'warning' colors.
+
+``slack_proxy``: By default Elastalert will not use a network proxy to send notifications to Slack. Set this option using ``hostname:port`` if you need to use a proxy.
+
+Telegram
+~~~~~
+Telegram alerter will send a notification to a predefined Telegram username or channel. The body of the notification is formatted the same as with other alerters.
+
+The alerter requires the following two options:
+
+``telegram_bot_token``: The token is a string along the lines of ``110201543:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw`` that will be required to authorize the bot and send requests to the Bot API. You can learn about obtaining tokens and generating new ones in this document https://core.telegram.org/bots#botfather
+
+``telegram_room_id``: Unique identifier for the target chat or username of the target channel (in the format @channelusername)
+
+Optional:
+
+``telegram_api_url``: Custom domain to call Telegram Bot API. Default to api.telegram.org
+
+PagerDuty
+~~~~~~~~~
+
+PagerDuty alerter will trigger an incident to a predefined PagerDuty service. The body of the notification is formatted the same as with other alerters.
+
+The alerter requires the following option:
+
+``pagerduty_service_key``: Integration Key generated after creating a service with the 'Use our API directly' option at Integration Settings
+
+``pagerduty_client_name``: The name of the monitoring client that is triggering this event.
+
+VictorOps
+~~~~~~~~~
+
+VictorOps alerter will trigger an incident to a predefined VictorOps routing key. The body of the notification is formatted the same as with other alerters.
+
+The alerter requires the following options:
+
+``victorops_api_key``: API key generated under the 'REST Endpoint' in the Integrations settings.
+
+``victorops_routing_key``: VictorOps routing key to route the alert to.
+
+``victorops_message_type``: VictorOps field to specify serverity level. Must be one of the following: INFO, WARNING, ACKNOWLEDGEMENT, CRITICAL, RECOVERY
+
+Optional:
+
+``victorops_entity_display_name``: Humna-readable name of alerting entity. Used by VictorOps to correlate incidents by host througout the alert lifecycle.
+
 Debug
 ~~~~~~
 
-The debug alerter will log the alert information using the Python logger at the info level.
+The debug alerter will log the alert information using the Python logger at the info level. It is logged into a Python Logger object with the name ``elastalert`` that can be easily accessed using the ``getLogger`` command.

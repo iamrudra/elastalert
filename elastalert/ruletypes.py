@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 import datetime
-import logging
-from collections import deque
 
+from blist import sortedlist
 from elasticsearch.client import Elasticsearch
 from util import dt_to_ts
 from util import EAException
+from util import elastalert_logger
 from util import format_index
 from util import hashable
 from util import lookup_es_key
@@ -168,22 +168,24 @@ class FrequencyRule(RuleType):
         super(FrequencyRule, self).__init__(*args)
         self.ts_field = self.rules.get('timestamp_field', '@timestamp')
         self.get_ts = lambda event: event[0][self.ts_field]
+        self.attach_related = self.rules.get('attach_related', False)
 
     def add_count_data(self, data):
         """ Add count data to the rule. Data should be of the form {ts: count}. """
         if len(data) > 1:
             raise EAException('add_count_data can only accept one count at a time')
-        for ts, count in data.iteritems():
-            event = ({self.ts_field: ts}, count)
-            self.occurrences.setdefault('all', EventWindow(self.rules['timeframe'], getTimestamp=self.get_ts)).append(event)
-            self.check_for_match('all')
+
+        (ts, count), = data.items()
+
+        event = ({self.ts_field: ts}, count)
+        self.occurrences.setdefault('all', EventWindow(self.rules['timeframe'], getTimestamp=self.get_ts)).append(event)
+        self.check_for_match('all')
 
     def add_terms_data(self, terms):
         for timestamp, buckets in terms.iteritems():
             for bucket in buckets:
-                count = bucket['doc_count']
                 event = ({self.ts_field: timestamp,
-                          self.rules['query_key']: bucket['key']}, count)
+                          self.rules['query_key']: bucket['key']}, bucket['doc_count'])
                 self.occurrences.setdefault(bucket['key'], EventWindow(self.rules['timeframe'], getTimestamp=self.get_ts)).append(event)
                 self.check_for_match(bucket['key'])
 
@@ -208,6 +210,8 @@ class FrequencyRule(RuleType):
         # Match if, after removing old events, we hit num_events
         if self.occurrences[key].count() >= self.rules['num_events']:
             event = self.occurrences[key].data[-1][0]
+            if self.attach_related:
+                event['related_events'] = [data[0] for data in self.occurrences[key].data[:-1]]
             self.add_match(event)
             self.occurrences.pop(key)
 
@@ -244,26 +248,23 @@ class EventWindow(object):
         self.timeframe = timeframe
         self.onRemoved = onRemoved
         self.get_ts = getTimestamp
-        self.data = deque()
+        self.data = sortedlist(key=self.get_ts)
         self.running_count = 0
 
     def clear(self):
-        self.data = deque()
+        self.data = sortedlist(key=self.get_ts)
         self.running_count = 0
 
     def append(self, event):
         """ Add an event to the window. Event should be of the form (dict, count).
         This will also pop the oldest events and call onRemoved on them until the
         window size is less than timeframe. """
-        # If the event occurred before our 'latest' event
-        if len(self.data) and self.get_ts(self.data[-1]) > self.get_ts(event):
-            self.append_middle(event)
-        else:
-            self.data.append(event)
-            self.running_count += event[1]
+        self.data.add(event)
+        self.running_count += event[1]
 
         while self.duration() >= self.timeframe:
-            oldest = self.data.popleft()
+            oldest = self.data[0]
+            self.data.remove(oldest)
             self.running_count -= oldest[1]
             self.onRemoved and self.onRemoved(oldest)
 
@@ -377,7 +378,11 @@ class SpikeRule(RuleType):
             self.ref_window_filled_once = True
 
         if self.find_matches(self.ref_windows[qk].count(), self.cur_windows[qk].count()):
-            match = self.cur_windows[qk].data[-1][0]
+            # skip over placeholder events which have count=0
+            for match, count in self.cur_windows[qk].data:
+                if count:
+                    break
+
             self.add_match(match, qk)
             self.clear_windows(qk, match)
 
@@ -508,7 +513,7 @@ class NewTermsRule(RuleType):
 
     def get_all_terms(self, args):
         """ Performs a terms aggregation for each field to get every existing term. """
-        self.es = Elasticsearch(host=self.rules['es_host'], port=self.rules['es_port'])
+        self.es = Elasticsearch(host=self.rules['es_host'], port=self.rules['es_port'], timeout=self.rules.get('es_conn_timeout', 50))
         window_size = datetime.timedelta(**self.rules.get('terms_window_size', {'days': 30}))
         field_name = {"field": "", "size": 2147483647}  # Integer.MAX_VALUE
         query_template = {"aggs": {"values": {"terms": field_name}}}
@@ -527,20 +532,20 @@ class NewTermsRule(RuleType):
 
         for field in self.fields:
             field_name['field'] = field
-            res = self.es.search(body=query, index=index, ignore_unavailable=True, timeout=50)
+            res = self.es.search(body=query, index=index, ignore_unavailable=True, timeout='50s')
             if 'aggregations' in res:
                 buckets = res['aggregations']['filtered']['values']['buckets']
                 keys = [bucket['key'] for bucket in buckets]
                 self.seen_values[field] = keys
-                logging.info('Found %s unique values for %s' % (len(keys), field))
+                elastalert_logger.info('Found %s unique values for %s' % (len(keys), field))
             else:
                 self.seen_values[field] = []
-                logging.info('Found no values for %s' % (field))
+                elastalert_logger.info('Found no values for %s' % (field))
 
     def add_data(self, data):
         for document in data:
             for field in self.fields:
-                value = document.get(field)
+                value = lookup_es_key(document, field)
                 if not value and self.rules.get('alert_on_missing_field'):
                     document['missing_field'] = field
                     self.add_match(document)
@@ -561,6 +566,7 @@ class NewTermsRule(RuleType):
                                  self.rules['timestamp_field']: timestamp,
                                  'new_field': field}
                         self.add_match(match)
+                        self.seen_values[field].append(bucket['key'])
 
 
 class CardinalityRule(RuleType):
@@ -624,8 +630,12 @@ class CardinalityRule(RuleType):
         lt = self.rules.get('use_local_time')
         starttime = pretty_ts(dt_to_ts(ts_to_dt(match[self.ts_field]) - self.rules['timeframe']), lt)
         endtime = pretty_ts(match[self.ts_field], lt)
-        message = ('A maximum of %d unique %s(s) occurred since last alert or '
-                   'between %s and %s\n\n' % (self.rules['max_cardinality'],
-                                              self.rules['cardinality_field'],
-                                              starttime, endtime))
+        if 'max_cardinality' in self.rules:
+            message = ('A maximum of %d unique %s(s) occurred since last alert or between %s and %s\n\n' % (self.rules['max_cardinality'],
+                                                                                                            self.rules['cardinality_field'],
+                                                                                                            starttime, endtime))
+        else:
+            message = ('Less than %d unique %s(s) occurred since last alert or between %s and %s\n\n' % (self.rules['min_cardinality'],
+                                                                                                         self.rules['cardinality_field'],
+                                                                                                         starttime, endtime))
         return message

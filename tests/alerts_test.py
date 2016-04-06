@@ -2,6 +2,7 @@
 import datetime
 import json
 import subprocess
+from contextlib import nested
 
 import mock
 from jira.exceptions import JIRAError
@@ -11,7 +12,10 @@ from elastalert.alerts import CommandAlerter
 from elastalert.alerts import EmailAlerter
 from elastalert.alerts import JiraAlerter
 from elastalert.alerts import JiraFormattedMatchString
+from elastalert.alerts import SlackAlerter
+from elastalert.opsgenie import OpsGenieAlerter
 from elastalert.util import ts_add
+from elastalert.config import load_modules
 
 
 class mock_rule:
@@ -22,7 +26,7 @@ class mock_rule:
 def test_basic_match_string(ea):
     ea.rules[0]['top_count_keys'] = ['username']
     match = {'@timestamp': '1918-01-17', 'field': 'value', 'top_events_username': {'bob': 10, 'mallory': 5}}
-    alert_text = str(BasicMatchString(ea.rules[0], match))
+    alert_text = unicode(BasicMatchString(ea.rules[0], match))
     assert 'anytest' in alert_text
     assert 'some stuff happened' in alert_text
     assert 'username' in alert_text
@@ -31,27 +35,31 @@ def test_basic_match_string(ea):
 
     # Non serializable objects don't cause errors
     match['non-serializable'] = {open: 10}
-    alert_text = str(BasicMatchString(ea.rules[0], match))
+    alert_text = unicode(BasicMatchString(ea.rules[0], match))
+
+    # unicode objects dont cause errors
+    match['snowman'] = u'☃'
+    alert_text = unicode(BasicMatchString(ea.rules[0], match))
 
     # Pretty printed objects
     match.pop('non-serializable')
     match['object'] = {'this': {'that': [1, 2, "3"]}}
-    alert_text = str(BasicMatchString(ea.rules[0], match))
+    alert_text = unicode(BasicMatchString(ea.rules[0], match))
     assert '"this": {\n        "that": [\n            1,\n            2,\n            "3"\n        ]\n    }' in alert_text
 
     ea.rules[0]['alert_text'] = 'custom text'
-    alert_text = str(BasicMatchString(ea.rules[0], match))
+    alert_text = unicode(BasicMatchString(ea.rules[0], match))
     assert 'custom text' in alert_text
 
     ea.rules[0]['alert_text_type'] = 'alert_text_only'
-    alert_text = str(BasicMatchString(ea.rules[0], match))
+    alert_text = unicode(BasicMatchString(ea.rules[0], match))
     assert 'custom text' in alert_text
     assert 'some stuff happened' not in alert_text
     assert 'username' not in alert_text
     assert 'field: value' not in alert_text
 
     ea.rules[0]['alert_text_type'] = 'exclude_fields'
-    alert_text = str(BasicMatchString(ea.rules[0], match))
+    alert_text = unicode(BasicMatchString(ea.rules[0], match))
     assert 'custom text' in alert_text
     assert 'some stuff happened' in alert_text
     assert 'username' in alert_text
@@ -77,7 +85,7 @@ def test_jira_formatted_match_string(ea):
 def test_email():
     rule = {'name': 'test alert', 'email': ['testing@test.test', 'test@test.test'], 'from_addr': 'testfrom@test.test',
             'type': mock_rule(), 'timestamp_field': '@timestamp', 'email_reply_to': 'test@example.com',
-            'alert_subject': 'Test alert for {0}', 'alert_subject_args': ['test_term']}
+            'alert_subject': 'Test alert for {0}', 'alert_subject_args': ['test_term'], 'snowman': u'☃'}
     with mock.patch('elastalert.alerts.SMTP') as mock_smtp:
         mock_smtp.return_value = mock.Mock()
 
@@ -206,7 +214,7 @@ def test_email_with_args():
         mock_smtp.return_value = mock.Mock()
 
         alert = EmailAlerter(rule)
-        alert.alert([{'test_term': 'test_value', 'test_arg1': 'testing', 'test': {'term': ':)', 'arg3': ':('}}])
+        alert.alert([{'test_term': 'test_value', 'test_arg1': 'testing', 'test': {'term': ':)', 'arg3': u'☃'}}])
         expected = [mock.call('localhost'),
                     mock.call().ehlo(),
                     mock.call().has_extn('STARTTLS'),
@@ -216,10 +224,12 @@ def test_email_with_args():
         assert mock_smtp.mock_calls == expected
 
         body = mock_smtp.mock_calls[4][1][2]
+        # Extract the MIME encoded message body
+        body_text = body.split('\n\n')[-1][:-1].decode('base64')
 
-        assert 'testing' in body
-        assert '<MISSING VALUE>' in body
-        assert ':(' in body
+        assert 'testing' in body_text
+        assert '<MISSING VALUE>' in body_text
+        assert '☃' in body_text
 
         assert 'Reply-To: test@example.com' in body
         assert 'To: testing@test.test' in body
@@ -247,59 +257,129 @@ def test_email_query_key_in_subject():
         assert found_subject
 
 
-def test_jira():
-    rule = {'name': 'test alert', 'jira_account_file': 'jirafile', 'type': mock_rule(),
-            'jira_project': 'testproject', 'jira_issuetype': 'testtype', 'jira_server': 'jiraserver',
-            'jira_label': 'testlabel', 'jira_component': 'testcomponent',
-            'timestamp_field': '@timestamp', 'alert_subject': 'Issue {0} occurred at {1}',
-            'alert_subject_args': ['test_term', '@timestamp']}
-    with mock.patch('elastalert.alerts.JIRA') as mock_jira:
-        with mock.patch('elastalert.alerts.yaml_loader') as mock_open:
-            mock_open.return_value = {'user': 'jirauser', 'password': 'jirapassword'}
-            mock_priority = mock.Mock()
-            mock_priority.id = '5'
-            mock_jira.return_value.priorities.return_value = [mock_priority]
-            alert = JiraAlerter(rule)
-            alert.alert([{'test_term': 'test_value', '@timestamp': '2014-10-31T00:00:00'}])
+def test_opsgenie_basic():
+    rule = {'name': 'testOGalert', 'opsgenie_key': 'ogkey',
+            'opsgenie_account': 'genies', 'opsgenie_addr': 'https://api.opsgenie.com/v1/json/alert',
+            'opsgenie_recipients': ['lytics'], 'type': mock_rule()}
+    with mock.patch('requests.post') as mock_post:
 
-            expected = [mock.call('jiraserver', basic_auth=('jirauser', 'jirapassword')),
-                        mock.call().priorities(),
-                        mock.call().create_issue(issuetype={'name': 'testtype'},
-                                                 project={'key': 'testproject'},
-                                                 labels=['testlabel'],
-                                                 components=[{'name': 'testcomponent'}],
-                                                 description=mock.ANY,
-                                                 summary='Issue test_value occurred at 2014-10-31T00:00:00')]
-            # We don't care about additional calls to mock_jira, such as __str__
-            assert mock_jira.mock_calls[:3] == expected
+        alert = OpsGenieAlerter(rule)
+        alert.alert([{'@timestamp': '2014-10-31T00:00:00'}])
+        print("mock_post: {0}".format(mock_post._mock_call_args_list))
+        mcal = mock_post._mock_call_args_list
+        print('mcal: {0}'.format(mcal[0]))
+        assert mcal[0][0][0] == ('https://api.opsgenie.com/v1/json/alert')
+
+        assert mock_post.called
+
+        assert mcal[0][1]['json']['apiKey'] == 'ogkey'
+        assert mcal[0][1]['json']['source'] == 'ElastAlert'
+        assert mcal[0][1]['json']['recipients'] == ['lytics']
+        assert mcal[0][1]['json']['source'] == 'ElastAlert'
+
+
+def test_opsgenie_frequency():
+    rule = {'name': 'testOGalert', 'opsgenie_key': 'ogkey',
+            'opsgenie_account': 'genies', 'opsgenie_addr': 'https://api.opsgenie.com/v1/json/alert',
+            'opsgenie_recipients': ['lytics'], 'type': mock_rule(),
+            'filter': [{'query': {'query_string': {'query': '*hihi*'}}}],
+            'alert': 'opsgenie'}
+    with mock.patch('requests.post') as mock_post:
+
+        alert = OpsGenieAlerter(rule)
+        alert.alert([{'@timestamp': '2014-10-31T00:00:00'}])
+
+        assert alert.get_info()['recipients'] == rule['opsgenie_recipients']
+
+        print("mock_post: {0}".format(mock_post._mock_call_args_list))
+        mcal = mock_post._mock_call_args_list
+        print('mcal: {0}'.format(mcal[0]))
+        assert mcal[0][0][0] == ('https://api.opsgenie.com/v1/json/alert')
+
+        assert mock_post.called
+
+        assert mcal[0][1]['json']['apiKey'] == 'ogkey'
+        assert mcal[0][1]['json']['source'] == 'ElastAlert'
+        assert mcal[0][1]['json']['recipients'] == ['lytics']
+        assert mcal[0][1]['json']['source'] == 'ElastAlert'
+        assert mcal[0][1]['json']['source'] == 'ElastAlert'
+
+
+def test_jira():
+    description_txt = "Description stuff goes here like a runbook link."
+    rule = {
+        'name': 'test alert',
+        'jira_account_file': 'jirafile',
+        'type': mock_rule(),
+        'jira_project': 'testproject',
+        'jira_issuetype': 'testtype',
+        'jira_server': 'jiraserver',
+        'jira_label': 'testlabel',
+        'jira_component': 'testcomponent',
+        'jira_description': description_txt,
+        'timestamp_field': '@timestamp',
+        'alert_subject': 'Issue {0} occurred at {1}',
+        'alert_subject_args': ['test_term', '@timestamp']
+    }
+
+    mock_priority = mock.Mock(id='5')
+
+    with nested(
+        mock.patch('elastalert.alerts.JIRA'),
+        mock.patch('elastalert.alerts.yaml_loader')
+    ) as (mock_jira, mock_open):
+        mock_open.return_value = {'user': 'jirauser', 'password': 'jirapassword'}
+        mock_jira.return_value.priorities.return_value = [mock_priority]
+        alert = JiraAlerter(rule)
+        alert.alert([{'test_term': 'test_value', '@timestamp': '2014-10-31T00:00:00'}])
+
+    expected = [
+        mock.call('jiraserver', basic_auth=('jirauser', 'jirapassword')),
+        mock.call().priorities(),
+        mock.call().create_issue(
+            issuetype={'name': 'testtype'},
+            project={'key': 'testproject'},
+            labels=['testlabel'],
+            components=[{'name': 'testcomponent'}],
+            description=mock.ANY,
+            summary='Issue test_value occurred at 2014-10-31T00:00:00')
+    ]
+
+    # We don't care about additional calls to mock_jira, such as __str__
+    assert mock_jira.mock_calls[:3] == expected
+    assert mock_jira.mock_calls[2][2]['description'].startswith(description_txt)
 
     # Search called if jira_bump_tickets
     rule['jira_bump_tickets'] = True
-    with mock.patch('elastalert.alerts.JIRA') as mock_jira:
-        with mock.patch('elastalert.alerts.yaml_loader') as mock_open:
-            mock_open.return_value = {'user': 'jirauser', 'password': 'jirapassword'}
-            mock_jira.return_value = mock.Mock()
-            mock_jira.return_value.search_issues.return_value = []
-            mock_jira.return_value.priorities.return_value = [mock_priority]
+    with nested(
+        mock.patch('elastalert.alerts.JIRA'),
+        mock.patch('elastalert.alerts.yaml_loader')
+    ) as (mock_jira, mock_open):
+        mock_open.return_value = {'user': 'jirauser', 'password': 'jirapassword'}
+        mock_jira.return_value = mock.Mock()
+        mock_jira.return_value.search_issues.return_value = []
+        mock_jira.return_value.priorities.return_value = [mock_priority]
 
-            alert = JiraAlerter(rule)
-            alert.alert([{'test_term': 'test_value', '@timestamp': '2014-10-31T00:00:00'}])
+        alert = JiraAlerter(rule)
+        alert.alert([{'test_term': 'test_value', '@timestamp': '2014-10-31T00:00:00'}])
 
-            expected.insert(2, mock.call().search_issues(mock.ANY))
-            assert mock_jira.mock_calls == expected
+    expected.insert(2, mock.call().search_issues(mock.ANY))
+    assert mock_jira.mock_calls == expected
 
     # Issue is still created if search_issues throws an exception
-    with mock.patch('elastalert.alerts.JIRA') as mock_jira:
-        with mock.patch('elastalert.alerts.yaml_loader') as mock_open:
-            mock_open.return_value = {'user': 'jirauser', 'password': 'jirapassword'}
-            mock_jira.return_value = mock.Mock()
-            mock_jira.return_value.search_issues.side_effect = JIRAError
-            mock_jira.return_value.priorities.return_value = [mock_priority]
+    with nested(
+        mock.patch('elastalert.alerts.JIRA'),
+        mock.patch('elastalert.alerts.yaml_loader')
+    ) as (mock_jira, mock_open):
+        mock_open.return_value = {'user': 'jirauser', 'password': 'jirapassword'}
+        mock_jira.return_value = mock.Mock()
+        mock_jira.return_value.search_issues.side_effect = JIRAError
+        mock_jira.return_value.priorities.return_value = [mock_priority]
 
-            alert = JiraAlerter(rule)
-            alert.alert([{'test_term': 'test_value', '@timestamp': '2014-10-31T00:00:00'}])
+        alert = JiraAlerter(rule)
+        alert.alert([{'test_term': 'test_value', '@timestamp': '2014-10-31T00:00:00'}])
 
-            assert mock_jira.mock_calls == expected
+    assert mock_jira.mock_calls == expected
 
 
 def test_kibana(ea):
@@ -368,3 +448,79 @@ def test_command():
         alert.alert([match])
     assert mock_popen.called_with(['/bin/test', '--arg', 'foobarbaz'], stdin=subprocess.PIPE)
     assert mock_subprocess.communicate.called_with(input=json.dumps(match))
+
+
+def test_slack_uses_custom_title():
+    rule = {
+        'name': 'Test Rule',
+        'type': 'any',
+        'slack_webhook_url': 'http://please.dontgohere.slack',
+        'alert_subject': 'Cool subject',
+        'alert': []
+    }
+    load_modules(rule)
+    alert = SlackAlerter(rule)
+    match = {
+        '@timestamp': '2016-01-01T00:00:00',
+        'somefield': 'foobarbaz'
+    }
+    with mock.patch('requests.post') as mock_post_request:
+        alert.alert([match])
+
+    expected_data = {
+        'username': 'elastalert',
+        'icon_emoji': ':ghost:',
+        'attachments': [
+            {
+                'color': 'danger',
+                'title': rule['alert_subject'],
+                'text': BasicMatchString(rule, match).__str__(),
+                'fields': []
+            }
+        ]
+    }
+    mock_post_request.assert_called_once_with(rule['slack_webhook_url'], data=json.dumps(expected_data), headers={'content-type': 'application/json'}, proxies=None)
+
+
+def test_slack_uses_rule_name_when_custom_title_is_not_provided():
+    rule = {
+        'name': 'Test Rule',
+        'type': 'any',
+        'slack_webhook_url': 'http://please.dontgohere.slack',
+        'alert': []
+    }
+    load_modules(rule)
+    alert = SlackAlerter(rule)
+    match = {
+        '@timestamp': '2016-01-01T00:00:00',
+        'somefield': 'foobarbaz'
+    }
+    with mock.patch('requests.post') as mock_post_request:
+        alert.alert([match])
+
+    expected_data = {
+        'username': 'elastalert',
+        'icon_emoji': ':ghost:',
+        'attachments': [
+            {
+                'color': 'danger',
+                'title': rule['name'],
+                'text': BasicMatchString(rule, match).__str__(),
+                'fields': []
+            }
+        ]
+    }
+    mock_post_request.assert_called_once_with(rule['slack_webhook_url'], data=json.dumps(expected_data), headers={'content-type': 'application/json'}, proxies=None)
+
+
+def test_alert_text_kw(ea):
+    rule = ea.rules[0].copy()
+    rule['alert_text'] = '{field} at {time}'
+    rule['alert_text_kw'] = {
+        '@timestamp': 'time',
+        'field': 'field',
+    }
+    match = {'@timestamp': '1918-01-17', 'field': 'value'}
+    alert_text = unicode(BasicMatchString(rule, match))
+    body = '{field} at {@timestamp}'.format(**match)
+    assert body in alert_text

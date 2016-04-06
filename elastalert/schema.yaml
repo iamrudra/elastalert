@@ -16,10 +16,11 @@ definitions:
       minutes: {type: number}
       seconds: {type: number}
       milliseconds: {type: number}
+      schedule: {type: string}
 
   filter: &filter {}
 
-required: [name, type, index, alert, es_port, es_host]
+required: [name, type, index, alert]
 type: object
 
 ### Rule Types section
@@ -61,6 +62,7 @@ oneOf:
       doc_type: {type: string}
       use_terms_query: {type: boolean}
       terms_size: {type: integer}
+      attach_related: {type: boolean}
 
   - title: Spike
     required: [spike_height, spike_type, timeframe]
@@ -117,7 +119,6 @@ properties:
   es_port: {type: integer}
   index: {type: string}
   name: {type: string}
-  alert: {type: string}
 
   use_ssl: {type: boolean}
   es_username: {type: string}
@@ -148,14 +149,10 @@ properties:
   match_enhancements: {type: array, items: {type: string}}
   query_key: *arrayOfString
 
-  # Alerts
-  alert: *arrayOfString
-  alert_subject: {type: string} # Python format string
-  alert_subject_args: {type: array, items: {type: string}}
-
   # Alert Content
   alert_text: {type: string} # Python format string
   alert_text_args: {type: array, items: {type: string}}
+  alert_text_kw: {type: object}
   alert_text_type: {enum: [alert_text_only, exclude_fields]}
   timestamp_field: {type: string}
   field: {}
@@ -167,6 +164,7 @@ properties:
   ### Email
   email: *arrayOfString
   email_reply_to: {type: string}
+  notify_email: *arrayOfString # if rule is slow or erroring, send to this email
   smtp_host: {type: string}
   from_addr: {type: string}
 
@@ -180,3 +178,30 @@ properties:
   jira_label: {type: string}
   jira_bump_tickets: {type: boolean}
   jira_max_age: {type: number}
+
+  ### HipChat
+  hipchat_auth_token: {type: string}
+  hipchat_room_id: {type: number}
+  hipchat_domain: {type: string}
+  hipchat_ignore_ssl_errors: {type: boolean}
+
+  ### Slack
+  slack_webhook_url: {type: string}
+  slack_username_override: {type: string}
+  slack_emoji_override: {type: string}
+  slack_msg_color: {enum: [good, warning, danger]}
+
+  ### PagerDuty
+  pagerduty_service_key: {type: string}
+  pagerduty_client_name: {type: string}
+
+  ### VictorOps
+  victorops_api_key: {type: string}
+  victorops_routing_key: {type: string}
+  victorops_message_type: {enum: [INFO, WARNING, ACKNOWLEDGEMENT, CRITICAL, RECOVERY]}
+  victorops_entity_display_name: {type: string}
+
+  ### Telegram
+  telegram_bot_token: {type: string}
+  telegram_room_id: {type: string}
+  telegram_api_url: {type: string}

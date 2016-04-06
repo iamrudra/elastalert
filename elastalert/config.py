@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import copy
 import datetime
 import hashlib
 import logging
@@ -10,6 +11,7 @@ import jsonschema
 import ruletypes
 import yaml
 import yaml.scanner
+from opsgenie import OpsGenieAlerter
 from staticconf.loader import yaml_loader
 from util import dt_to_ts
 from util import dt_to_unix
@@ -19,13 +21,12 @@ from util import ts_to_dt
 from util import unix_to_dt
 from util import unixms_to_dt
 
-
 # schema for rule yaml
 rule_schema = jsonschema.Draft4Validator(yaml.load(open(os.path.join(os.path.dirname(__file__), 'schema.yaml'))))
 
 # Required global (config.yaml) and local (rule.yaml)  configuration options
 required_globals = frozenset(['run_every', 'rules_folder', 'es_host', 'es_port', 'writeback_index', 'buffer_time'])
-required_locals = frozenset(['alert', 'type', 'name', 'es_host', 'es_port', 'index'])
+required_locals = frozenset(['alert', 'type', 'name', 'index'])
 
 # Used to map the names of rules to their classes
 rules_mapping = {
@@ -44,8 +45,15 @@ rules_mapping = {
 alerts_mapping = {
     'email': alerts.EmailAlerter,
     'jira': alerts.JiraAlerter,
+    'opsgenie': OpsGenieAlerter,
     'debug': alerts.DebugAlerter,
-    'command': alerts.CommandAlerter
+    'command': alerts.CommandAlerter,
+    'sns': alerts.SnsAlerter,
+    'hipchat': alerts.HipChatAlerter,
+    'slack': alerts.SlackAlerter,
+    'pagerduty': alerts.PagerDutyAlerter,
+    'victorops': alerts.VictorOpsAlerter,
+    'telegram': alerts.TelegramAlerter
 }
 
 
@@ -62,7 +70,7 @@ def get_module(module_name):
     return module
 
 
-def load_configuration(filename, conf=None, args=None):
+def load_configuration(filename, conf, args=None):
     """ Load a yaml rule file and fill in the relevant fields with objects.
 
     :param filename: The name of a rule configuration file.
@@ -80,7 +88,7 @@ def load_configuration(filename, conf=None, args=None):
     return rule
 
 
-def load_options(rule, conf=None, args=None):
+def load_options(rule, conf, args=None):
     """ Converts time objects, sets defaults, and validates some settings.
 
     :param rule: A dictionary of parsed YAML from a rule config file.
@@ -100,7 +108,7 @@ def load_options(rule, conf=None, args=None):
             rule['realert'] = datetime.timedelta(**rule['realert'])
         else:
             rule['realert'] = datetime.timedelta(minutes=1)
-        if 'aggregation' in rule:
+        if 'aggregation' in rule and not rule['aggregation'].get('schedule'):
             rule['aggregation'] = datetime.timedelta(**rule['aggregation'])
         if 'query_delay' in rule:
             rule['query_delay'] = datetime.timedelta(**rule['query_delay'])
@@ -124,6 +132,13 @@ def load_options(rule, conf=None, args=None):
     rule.setdefault('timestamp_type', 'iso')
     rule.setdefault('_source_enabled', True)
     rule.setdefault('use_local_time', True)
+    rule.setdefault('es_port', conf.get('es_port'))
+    rule.setdefault('es_host', conf.get('es_host'))
+    rule.setdefault('es_username', conf.get('es_username'))
+    rule.setdefault('es_password', conf.get('es_password'))
+    rule.setdefault('max_query_size', conf.get('max_query_size'))
+    rule.setdefault('es_conn_timeout', conf.get('es_conn_timeout'))
+    rule.setdefault('description', "")
 
     # Set timestamp_type conversion function, used when generating queries and processing hits
     rule['timestamp_type'] = rule['timestamp_type'].strip().lower()
@@ -140,13 +155,19 @@ def load_options(rule, conf=None, args=None):
         raise EAException('timestamp_type must be one of iso, unix, or unix_ms')
 
     # Set email options from global config
-    if conf:
-        rule.setdefault('smtp_host', conf.get('smtp_host', 'localhost'))
-        if 'smtp_host' in conf:
-            rule.setdefault('smtp_host', conf.get('smtp_port'))
-        rule.setdefault('from_addr', conf.get('from_addr', 'ElastAlert'))
-        if 'email_reply_to' in conf:
-            rule.setdefault('email_reply_to', conf['email_reply_to'])
+    rule.setdefault('smtp_host', conf.get('smtp_host', 'localhost'))
+    rule.setdefault('from_addr', conf.get('from_addr', 'ElastAlert'))
+    if 'smtp_port' in conf:
+        rule.setdefault('smtp_port', conf.get('smtp_port'))
+    if 'smtp_ssl' in conf:
+        rule.setdefault('smtp_ssl', conf.get('smtp_ssl'))
+    if 'smtp_auth_file' in conf:
+        rule.setdefault('smtp_auth_file', conf.get('smtp_auth_file'))
+    if 'email_reply_to' in conf:
+        rule.setdefault('email_reply_to', conf['email_reply_to'])
+
+    # Set slack options from global config
+    rule.setdefault('slack_webhook_url', conf.get('slack_webhook_url'))
 
     # Make sure we have required options
     if required_locals - frozenset(rule.keys()):
@@ -160,7 +181,7 @@ def load_options(rule, conf=None, args=None):
         rule['query_key'] = ','.join(rule['query_key'])
 
     # Add QK, CK and timestamp to include
-    include = rule.get('include', [])
+    include = rule.get('include', ['*'])
     if 'query_key' in rule:
         include.append(rule['query_key'])
     if 'compound_query_key' in rule:
@@ -223,19 +244,6 @@ def load_modules(rule, args=None):
         match_enhancements.append(enhancement(rule))
     rule['match_enhancements'] = match_enhancements
 
-    # Convert all alerts into Alerter objects
-    rule_alerts = []
-    if type(rule['alert']) != list:
-        rule['alert'] = [rule['alert']]
-    for alert in rule['alert']:
-        if alert in alerts_mapping:
-            rule_alerts.append(alerts_mapping[alert])
-        else:
-            rule_alerts.append(get_module(alert))
-            if not issubclass(rule_alerts[-1], alerts.Alerter):
-                raise EAException('Alert module %s is not a subclass of Alerter' % (alert))
-        rule['alert'] = rule_alerts
-
     # Convert rule type into RuleType object
     if rule['type'] in rules_mapping:
         rule['type'] = rules_mapping[rule['type']]
@@ -246,22 +254,16 @@ def load_modules(rule, args=None):
 
     # Make sure we have required alert and type options
     reqs = rule['type'].required_options
-    for alert in rule['alert']:
-        reqs = reqs.union(alert.required_options)
+
     if reqs - frozenset(rule.keys()):
         raise EAException('Missing required option(s): %s' % (', '.join(reqs - frozenset(rule.keys()))))
-
-    # Instantiate alert
-    try:
-        rule['alert'] = [alert(rule) for alert in rule['alert']]
-    except (KeyError, EAException) as e:
-        raise EAException('Error initiating alert %s: %s' % (rule['alert'], e))
-
     # Instantiate rule
     try:
         rule['type'] = rule['type'](rule, args)
     except (KeyError, EAException) as e:
         raise EAException('Error initializing rule %s: %s' % (rule['name'], e))
+    # Instantiate alert
+    rule['alert'] = load_alerts(rule, alert_field=rule['alert'])
 
 
 def get_file_paths(conf, use_rule=None):
@@ -277,6 +279,53 @@ def get_file_paths(conf, use_rule=None):
             if filename.endswith('.yaml'):
                 rule_files.append(os.path.join(root, filename))
     return rule_files
+
+
+def load_alerts(rule, alert_field):
+    reqs = rule['type'].required_options
+    try:
+        # Convert all alerts into Alerter objects
+        global_alerts = []
+        inline_alerts = []
+        if type(alert_field) != list:
+            alert_field = [alert_field]
+        for alert in alert_field:
+            if isinstance(alert, basestring):
+                global_alerts.append(alerts_mapping[alert] if alert in alerts_mapping else get_module(alert))
+
+                if not issubclass(global_alerts[-1], alerts.Alerter):
+                    raise EAException('Alert module %s is not a subclass of Alerter' % (alert))
+
+            elif isinstance(alert, dict):
+                alert_name = alert.keys()[0]
+
+                # Each Inline Alert is a tuple, in the form (alert_configuration, alert_class_object)
+                if alert_name in alerts_mapping:
+                    inline_alerts.append((alert[alert_name], alerts_mapping[alert_name]))
+                else:
+                    inline_alerts.append((alert[alert_name], get_module(alert_name)))
+
+                if not issubclass(inline_alerts[-1][1], alerts.Alerter):
+                    raise EAException('Alert module %s is not a subclass of Alerter' % (alert))
+        alert_field = []
+        for (alert_config, alert) in inline_alerts:
+            copied_conf = copy.copy(rule)
+            rule_reqs = alert.required_options
+            copied_conf.update(alert_config)
+            if rule_reqs - frozenset(copied_conf.keys()):
+                raise EAException('Missing required option(s): %s' % (', '.join(rule_reqs - frozenset(copied_conf.keys()))))
+            alert_field.append(alert(copied_conf))
+
+        for alert in global_alerts:
+            reqs = reqs.union(alert.required_options)
+            if reqs - frozenset(rule.keys()):
+                raise EAException('Missing required option(s): %s' % (', '.join(reqs - frozenset(rule.keys()))))
+            else:
+                alert_field.append(alert(rule))
+    except (KeyError, EAException) as e:
+        raise EAException('Error initiating alert %s: %s' % (rule['alert'], e))
+
+    return alert_field
 
 
 def load_rules(args):
@@ -295,7 +344,7 @@ def load_rules(args):
     if required_globals - frozenset(conf.keys()):
         raise EAException('%s must contain %s' % (filename, ', '.join(required_globals - frozenset(conf.keys()))))
 
-    conf.setdefault('max_query_size', 100000)
+    conf.setdefault('max_query_size', 10000)
     conf.setdefault('disable_rules_on_error', True)
 
     # Convert run_every, buffer_time into a timedelta object

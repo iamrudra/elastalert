@@ -6,10 +6,10 @@ Running ElastAlert for the First Time
 Requirements
 ------------
 
-- pip
-- Elasticsearch 1.*
-- ISO8601 timestamped data
-- Python 2.6
+- Elasticsearch 1.* or 2.*
+- ISO8601 or Unix timestamped data
+- Python 2.6 or 2.7
+- pip, see requirements.txt
 
 Downloading and Configuring
 ---------------------------
@@ -21,6 +21,7 @@ First, clone the ElastAlert repository::
 Install the module::
 
     $ python setup.py install
+    $ pip install -r requirements.txt
 
 Next, open up config.yaml.example. In it, you will find several configuration options. ElastAlert may be run without changing any of these settings.
 
@@ -28,7 +29,7 @@ Next, open up config.yaml.example. In it, you will find several configuration op
 
 ``run_every`` is how often ElastAlert will query Elasticsearch.
 
-``buffer_time`` is the size of the query window, stretching backwards from the time each query is run.
+``buffer_time`` is the size of the query window, stretching backwards from the time each query is run. This value is ignored for rules where ``use_count_query`` or ``use_terms_query`` is set to true.
 
 ``es_host`` is the address of an Elasticsearch cluster where ElastAlert will store data about its state, queries run, alerts, and errors. Each rule may also use a different Elasticsearch host to query against.
 
@@ -123,7 +124,7 @@ Running ElastAlert
 
 There are two ways of invoking ElastAlert. As a daemon, through Supervisor (http://supervisord.org/), or directly with Python. For easier debugging purposes in this tutorial, we will invoke it directly::
 
-    $ python -m elastalert.elastalert --verbose --rule example_frequency.yaml
+    $ python -m elastalert.elastalert --verbose --rule example_frequency.yaml  # or use the entry point: elastalert --verbose --rule ...
     No handlers could be found for logger "elasticsearch"
     INFO:root:Queried rule Example rule from 1-15 14:22 PST to 1-15 15:07 PST: 5 hits
     INFO:elasticsearch:POST http://elasticsearch.example.com:14900/elastalert_status/elastalert_status?op_type=create [status:201 request:0.025s]
